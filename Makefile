@@ -17,6 +17,13 @@ data:
 ## Make features
 features:
 
+## play
+random-bvb:
+	$(PYTHON_INTERPRETER) src/random_bvb.py
+
+random-hvb:
+	$(PYTHON_INTERPRETER) src/random_hvb.py
+
 ## Delete all compiled Python files
 clean:
 	find . -type f -name "*.py[co]" -delete

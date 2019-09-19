@@ -30,6 +30,12 @@ depthbruned-bvb:
 alphabeta-bvb:
 	$(PYTHON_INTERPRETER) src/alphabeta_bvb.py
 
+mcts-bvb:
+	$(PYTHON_INTERPRETER) src/mcts_bvb.py
+
+mcts-hvb:
+	$(PYTHON_INTERPRETER) src/mcts_hvb.py
+
 ## Delete all compiled Python files
 clean:
 	find . -type f -name "*.py[co]" -delete

@@ -12,7 +12,8 @@ PYTHON_INTERPRETER = python3
 # Make helper 
 
 ## Make dataset
-data:
+fetch-kgs:
+	$(PYTHON_INTERPRETER) src/fetch_kgs.py
 
 ## Make features
 features:

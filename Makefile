@@ -14,6 +14,9 @@ PYTHON_INTERPRETER = python3
 fetch-kgs:
 	$(PYTHON_INTERPRETER) src/fetch_kgs.py
 
+records:
+	$(PYTHON_INTERPRETER) src/generate_records.py
+
 random-bvb:
 	$(PYTHON_INTERPRETER) src/random_bvb.py
 
@@ -34,6 +37,9 @@ mcts-hvb:
 
 train-gen:
 	$(PYTHON_INTERPRETER) src/train_generator.py
+
+train-ds:
+	$(PYTHON_INTERPRETER) src/train_dataset.py
 
 ## Delete all compiled Python files
 clean:

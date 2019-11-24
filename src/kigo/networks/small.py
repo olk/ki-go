@@ -1,30 +1,15 @@
 from tensorflow.keras.layers import Dense, Activation, Flatten
-from tensorflow.keras.layers import Conv2D, ZeroPadding2D
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Dropout
 
 
-def layers(input_shape):
+def layers(input_shape, classes, filters, conv_kernel, pool_size):
     return [
-        ZeroPadding2D(padding=3, input_shape=input_shape),  # <1>
-        Conv2D(48, (7, 7)),
-        Activation('relu'),
-
-        ZeroPadding2D(padding=2),  # <2>
-        Conv2D(32, (5, 5)),
-        Activation('relu'),
-
-        ZeroPadding2D(padding=2),
-        Conv2D(32, (5, 5)),
-        Activation('relu'),
-
-        ZeroPadding2D(padding=2),
-        Conv2D(32, (5, 5)),
-        Activation('relu'),
-
-        Flatten(),
-        Dense(512, name='XXX'),
-        Activation('relu'),
+        Conv2D(filters, conv_kernel, padding='valid', input_shape=input_shape, activation='relu', name='conv1'),
+        Conv2D(filters, conv_kernel, activation='relu', name='conv2'),
+        MaxPooling2D(pool_size=pool_size, name='pool'),
+        Dropout(0.25, name='dropout1'),
+        Flatten(name='flatten'),
+        Dense(25, activation='relu', name='dense1'),
+        Dropout(0.5, name='dropout2'),
+        Dense(classes, activation='relu', name='dense2'),
     ]
-
-# <1> We use zero padding layers to enlarge input images.
-# <2> By using `channels_last` we specify that the input plane dimension for our features comes first.
-# end::small_network[]

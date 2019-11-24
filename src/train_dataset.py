@@ -1,5 +1,6 @@
 import os
 import tensorflow as tf
+import tensorflow_datasets.public_api as tfds
 import time
 
 from dotenv import load_dotenv, find_dotenv
@@ -9,6 +10,7 @@ from tensorflow.keras.layers import Dense
 from tensorflow.keras.models import Sequential
 
 from kigo.data.processor import GoDataProcessor
+from kigo.data.dataset_builder import SGFDataset
 from kigo.data.dataset_creator import SGFTFDatasetCreator
 from kigo.encoders.oneplane import OnePlaneEncoder
 from kigo.networks import small
@@ -23,23 +25,31 @@ def main():
     model_p = Path(os.environ.get('PATH_MODEL')).resolve()
     batch_size = int(os.environ.get('BATCH_SIZE'))
     epochs = int(os.environ.get('EPOCHS'))
+    train_frac = float(os.environ.get('TRAIN_FRAC'))
+    val_frac = float(os.environ.get('VAL_FRAC'))
 
     go_board_rows, go_board_cols = 19, 19
     num_classes = go_board_rows * go_board_cols
     shuffle_buffer = 1000
     prefetch_size = tf.data.experimental.AUTOTUNE
 
-    tfd_train = SGFTFDatasetCreator(processed_p.joinpath('train'), batch_size)
-    ds_train = tfd_train.dataset
-    tfd_val = SGFTFDatasetCreator(processed_p.joinpath('val'), batch_size, train=False)
-    ds_val = tfd_val.dataset
+    encoder = OnePlaneEncoder((go_board_rows, go_board_cols))
+
+    builder = SGFDataset(encoder, train_frac, val_frac)
+    dl_config = tfds.download.DownloadConfig(register_checksums=True)
+    builder.download_and_prepare(download_config=dl_config)
+    ds_train = builder.as_dataset(split='train')
+    ds_val = builder.as_dataset(split='validation')
+
+   #tfd_train = SGFTFDatasetCreator(processed_p.joinpath('train'), batch_size)
+   #ds_train = tfd_train.dataset
+   #tfd_val = SGFTFDatasetCreator(processed_p.joinpath('val'), batch_size, train=False)
+   #ds_val = tfd_val.dataset
 
     ds_train = ds_train.shuffle(shuffle_buffer).repeat().batch(batch_size).prefetch(buffer_size=prefetch_size)
     ds_val = ds_val.repeat().batch(batch_size).prefetch(buffer_size=prefetch_size)
 
-    encoder = OnePlaneEncoder((go_board_rows, go_board_cols))
-
-    input_shape = (go_board_rows, go_board_cols, encoder.num_planes)
+    input_shape = encoder.shape()
     strategy = tf.distribute.OneDeviceStrategy(device="/gpu:0")
     #strategy = tf.distribute.MirroredStrategy()
     batch_size = batch_size * strategy.num_replicas_in_sync

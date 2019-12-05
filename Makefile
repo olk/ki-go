@@ -35,6 +35,9 @@ dataset:
 train:
 	$(PYTHON_INTERPRETER) src/train.py
 
+tune:
+	$(PYTHON_INTERPRETER) src/tune.py
+
 ## Delete all compiled Python files
 clean:
 	find . -type f -name "*.py[co]" -delete

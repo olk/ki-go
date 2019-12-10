@@ -11,12 +11,6 @@ PYTHON_INTERPRETER = python3
 
 # Make helper 
 
-fetch-kgs:
-	$(PYTHON_INTERPRETER) src/fetch_kgs.py
-
-records:
-	$(PYTHON_INTERPRETER) src/generate_records.py
-
 random-bvb:
 	$(PYTHON_INTERPRETER) src/random_bvb.py
 
@@ -35,11 +29,12 @@ mcts-bvb:
 mcts-hvb:
 	$(PYTHON_INTERPRETER) src/mcts_hvb.py
 
-train-gen:
-	$(PYTHON_INTERPRETER) src/train_generator.py
+dataset:
+	$(PYTHON_INTERPRETER) src/generate_dataset.py
 
-train-ds:
-	$(PYTHON_INTERPRETER) src/train_dataset.py
+train:
+	$(PYTHON_INTERPRETER) src/train.py
+
 
 ## Delete all compiled Python files
 clean:

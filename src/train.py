@@ -3,7 +3,6 @@ import tensorflow as tf
 import tensorflow_datasets.public_api as tfds
 import time
 
-from dotenv import load_dotenv, find_dotenv
 from pathlib import Path
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from tensorflow.keras.layers import Dense
@@ -17,14 +16,10 @@ from kigo.networks import betago
 
 def main():
     # env
-    env_path = find_dotenv()
-    load_dotenv(dotenv_path=env_path, verbose=True)
-    raw_p = Path(os.environ.get('PATH_RAW')).resolve()
-    processed_p = Path(os.environ.get('PATH_PROCESSED')).resolve()
-    model_p = Path(os.environ.get('PATH_MODEL')).resolve()
-    epochs = int(os.environ.get('EPOCHS'))
-    train_frac = float(os.environ.get('TRAIN_FRAC'))
-    val_frac = float(os.environ.get('VAL_FRAC'))
+    model_p = Path('model').resolve()
+    epochs = 25
+    train_frac = 0.8
+    val_frac = 0.1
 
     lr = 1e-6
     sample_size = 0

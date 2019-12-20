@@ -29,14 +29,14 @@ mcts-bvb:
 mcts-hvb:
 	$(PYTHON_INTERPRETER) src/mcts_hvb.py
 
-dataset:
-	$(PYTHON_INTERPRETER) src/generate_dataset.py
+dataset-tf:
+	$(PYTHON_INTERPRETER) src/generate_dataset_tf.py
 
-train:
-	$(PYTHON_INTERPRETER) src/train.py
+train-tf:
+	$(PYTHON_INTERPRETER) src/train_tf.py
 
-tune:
-	$(PYTHON_INTERPRETER) src/tune.py
+tune-tf:
+	$(PYTHON_INTERPRETER) src/tune_tf.py
 
 ## Delete all compiled Python files
 clean:

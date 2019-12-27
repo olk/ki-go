@@ -38,6 +38,9 @@ train-tf:
 tune-tf:
 	$(PYTHON_INTERPRETER) src/tune_tf.py
 
+get-data:
+	$(PYTHON_INTERPRETER) src/get_data.py
+
 ## Delete all compiled Python files
 clean:
 	find . -type f -name "*.py[co]" -delete

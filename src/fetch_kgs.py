@@ -1,7 +1,5 @@
-import os
 import shutil
 
-from dotenv import load_dotenv, find_dotenv
 from pathlib import Path
 from kigo.data.index_processor import KGSIndex
 
@@ -14,9 +12,7 @@ def download(data_p):
 
 
 def main():
-    env_path = find_dotenv()
-    load_dotenv(dotenv_path=env_path, verbose=True)
-    data_p = Path(os.environ.get('PATH_RAW')).resolve()
+    data_p = Path('raw').resolve()
     download(data_p)
 
 

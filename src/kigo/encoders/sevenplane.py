@@ -15,7 +15,7 @@ class SevenPlaneEncoder(Encoder):
     def encode(self, game_state):
         # fill a matrix with 1 if the point contains one of the current player's stones,
         # -1 if the point contains the opponent's stones and 0 if the point is empty
-        board_tensor = np.zeros(self.shape())
+        board_tensor = np.zeros(self.shape(), dtype='int')
         base_plane = {game_state.next_player: 0,
                       game_state.next_player.other: 3}
         for row in range(self.board_height):
@@ -35,7 +35,7 @@ class SevenPlaneEncoder(Encoder):
         return board_tensor
 
     def encode_point(self, point):
-        return self.board_width * (point.row - 1) + (point.col - 1)
+        return int(self.board_width * (point.row - 1) + (point.col - 1))
 
     def decode_point_index(self, index):
         row = index // self.board_width

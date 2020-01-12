@@ -272,82 +272,110 @@ class SGFDatasetBuilder:
         return self._get_data( recs_p)
 
 
+def _worker_fn(rec_p, encoder):
+    record = mx.recordio.MXRecordIO(str(rec_p), 'r')
+    size = int(record.read())
+    data = [None]*size
+    label = [None]*size
+    for i in range(size):
+        d = record.read()
+        hdr, s = mx.recordio.unpack(d)
+        label[i] = int(hdr.label)
+        data[i] = np.reshape(np.frombuffer(s, dtype='int'), encoder.shape())
+    record.close()
+    return data, label
+
+
 class SGFIter(mx.io.DataIter):
     def __init__(self, recs_p, batch_size, encoder, shuffle, num_games):
         super(SGFIter, self).__init__()
         self._batch_size = batch_size
-        self._recs_p = recs_p
+        self._base_recs_p = recs_p
         self._shuffle = shuffle
         self._num_games = num_games
         self._encoder = encoder
-        self._batch_idx = 0
-        self._send_idx = 0
+        self._sent_idx = 0
         self._rcv_idx = 0
         self._buffer = {}
-        self.data = []
-        self.label = []
+        self._data = []
+        self._label = []
+        # a games contains 100 moves at average
+        self._recs_per_batch = ceil(self._batch_size / 100)
+        # prefetch at least 10 batches
+        self._prefetch = 10 * self._recs_per_batch
+        cores = ceil(multiprocessing.cpu_count()/2)
+        self._pool = multiprocessing.Pool(processes=cores)
         self._provide_data = [mx.io.DataDesc('data', (self._batch_size,) + self._encoder.shape(), dtype='int', layout='NCHW')]
         self._provide_label = [mx.io.DataDesc('label', (self._batch_size,), dtype='int', layout='NCHW')]
-
-        recs_p = self._recs_p
-        if self._num_games is not None:
-            recs_p = random.sample(recs_p, self._num_games)
-        if shuffle:
-            random.shuffle(recs_p)
-        # process RecordIO files
-        cores = multiprocessing.cpu_count()
-        pool = multiprocessing.Pool(processes=cores)
-        try:
-            it = pool.imap(partial(self._extract, encoder=self._encoder), recs_p)
-            for f, l in it:
-                self.data.extend(f)
-                self.label.extend(l)
-            pool.close()
-            pool.join()
-        except KeyboardInterrupt:
-            pool.terminate()
-            pool.join()
-            sys.exit(1)
-        # determine max iteration index
-        self._max_idx = ceil(len(self.label)/self._batch_size)
+        self._recs_p = self._base_recs_p if self._num_games is None else random.sample(self._base_recs_p, self._num_games)
+        self._max_recs_idx = len(self._recs_p)
+        self.reset()
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        if self._batch_idx == self._max_idx:
-            # reached end of data/label lists
-            raise StopIteration
-        # get batch-sized lists of data and label
-        start_idx = self._batch_idx * self._batch_size
-        end_idx = start_idx + self._batch_size
-        data = self.data[start_idx:end_idx]
-        label = self.label[start_idx:end_idx]
-        # increment iteration index
-        self._batch_idx += 1
-        pad = 0
-        if len(label) < self._batch_size:
-            pad = self._batch_size - len(label)
-            data = data + [data[0]]*pad
-            label = label + [label[0]]*pad
-        data = [mx.nd.array(data)]
-        label = [mx.nd.array(label)]
-        return mx.io.DataBatch(data, label, pad=pad)
+        while True:
+            for _ in range(self._prefetch):
+                self._push_next()
+            while self._rcv_idx in self._buffer:
+                self._fetch_next()
+            if self._rcv_idx == self._sent_idx and self._sent_idx == self._max_recs_idx and not self._buffer and 0 == len(self._label):
+                assert not self._buffer, "data buffer should be empty at this moment"
+                # reached end of data/label lists
+                raise StopIteration
+            # get batch-sized lists of data and label
+            if (0 == len(self._label)):
+                print('continue')
+                continue
+            data = self._data[:self._batch_size]
+            label = self._label[:self._batch_size]
+            self._data = self._data[self._batch_size:]
+            self._label = self._label[self._batch_size:]
+            # increment iteration index
+            pad = 0
+            if len(label) < self._batch_size:
+                pad = self._batch_size - len(label)
+                data = data + [data[0]]*pad
+                label = label + [label[0]]*pad
+            data = [mx.nd.array(data)]
+            label = [mx.nd.array(label)]
+            return mx.io.DataBatch(data, label, pad=pad)
 
-    def _extract(self, rec_p, encoder):
-        record = mx.recordio.MXRecordIO(str(rec_p), 'r')
-        size = int(record.read())
-        data = [None]*size
-        label = [None]*size
-        for i in range(size):
-            d = record.read()
-            hdr, s = mx.recordio.unpack(d)
-            label[i] = int(hdr.label)
-            data[i] = np.reshape(np.frombuffer(s, dtype='int'), encoder.shape())
-        return data, label
+    def _fetch_next(self):
+        if self._rcv_idx >= self._sent_idx:
+            return
+        assert self._rcv_idx in self._buffer, ''
+        ret = self._buffer.pop(self._rcv_idx)
+        try:
+            data, label = ret.get()
+            self._data.extend(data)
+            self._label.extend(label)
+            self._rcv_idx += 1
+        except Exception:
+            self._pool.terminate()
+            raise
+
+    def _push_next(self):
+        if self._sent_idx == self._max_recs_idx:
+            return
+        rec_p = self._recs_p[self._sent_idx]
+        async_ret = self._pool.apply_async(_worker_fn, (rec_p, self._encoder))
+        self._buffer[self._sent_idx] = async_ret
+        self._sent_idx += 1
 
     def reset(self):
-        self._batch_idx = 0
+        self._sent_idx = 0
+        self._rcv_idx = 0
+        self._buffer = {}
+        self._data = []
+        self._label = []
+        if self._shuffle:
+            random.shuffle(self._recs_p)
+        for _ in range(self._prefetch):
+            self._push_next()
+        while self._rcv_idx in self._buffer:
+            self._fetch_next()
 
     @property
     def provide_data(self):

@@ -11,14 +11,6 @@ PYTHON_INTERPRETER = python3
 
 # Make helper 
 
-## Make dataset
-fetch-kgs:
-	$(PYTHON_INTERPRETER) src/fetch_kgs.py
-
-## Make features
-features:
-
-## play
 random-bvb:
 	$(PYTHON_INTERPRETER) src/random_bvb.py
 
@@ -36,6 +28,9 @@ mcts-bvb:
 
 mcts-hvb:
 	$(PYTHON_INTERPRETER) src/mcts_hvb.py
+
+train-betago:
+	$(PYTHON_INTERPRETER) src/train_betago.py
 
 ## Delete all compiled Python files
 clean:

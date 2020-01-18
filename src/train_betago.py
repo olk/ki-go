@@ -15,7 +15,7 @@ from kigo.networks.betago import Model
 BATCH_SIZE = 1024
 NUM_SEGMENTS = 500
 EPOCHS = 25
-GPU_COUNT = 2
+GPU_COUNT = 1
 PRINT_N = 5
 
 def main():
@@ -23,8 +23,8 @@ def main():
     encoder = SevenPlaneEncoder((19, 19))
     builder = SGFDatasetBuilder(data_p, encoder=encoder)
     builder.download_and_prepare()
-    train_ds = builder.as_train_dataset(batch_size=BATCH_SIZE, num_segments=NUM_SEGMENTS, shuffle=True)
-    test_ds = builder.as_test_dataset(batch_size=BATCH_SIZE)
+    train_itr = builder.train_dataset(batch_size=BATCH_SIZE, num_segments=NUM_SEGMENTS, shuffle=True)
+    #test_itr = builder.test_dataset(batch_size=BATCH_SIZE)
     # build nodel
     net = Model()
     # hybridize for speed
@@ -54,66 +54,65 @@ def main():
     metric = Accuracy()
     start = time.perf_counter()
     # train
-    for train_itr in train_ds:
-        start = time.perf_counter()
-        for e in range(EPOCHS):
-            tick = time.time()
-            # reset the train data iterator.
-            train_itr.reset()
-            # loop over the train data iterator
-            for i, batch in enumerate(train_itr):
-                if i == 0:
-                    tick_0 = time.time()
-                # splits train data into multiple slices along batch_axis
-                # copy each slice into a context
-                data = split_and_load(batch.data[0], ctx_list=ctx, batch_axis=0)
-                # splits train label into multiple slices along batch_axis
-                # copy each slice into a context
-                label = split_and_load(batch.label[0], ctx_list=ctx, batch_axis=0)
-                outputs = []
-                losses = []
-                # inside training scope
-                with ag.record():
-                    for x, y in zip(data, label):
-                        z = net(x)
-                        # computes softmax cross entropy loss
-                        l = loss_fn(z, y)
-                        outputs.append(z)
-                        losses.append(l)
-                # backpropagate the error for one iteration
-                for l in losses:
-                    l.backward()
-                # make one step of parameter update.
-                # trainer needs to know the batch size of data
-                # to normalize the gradient by 1/batch_size
-                trainer.step(BATCH_SIZE)
-                # updates internal evaluation
-                metric.update(label, outputs)
-                # Print batch metrics
-                if 0 == i % PRINT_N and 0 < i:
-                    print('Batch [{}], Accuracy {:.4f}, Samples/sec: {:.4f}'.format(
-                        i, metric.get()[1], BATCH_SIZE*(PRINT_N)/(time.time()-tick))
-                    )
-                    tick = time.time()
-            # gets the evaluation result
-            print('Epoch [{}], Accuracy {:.4f}'.format(e, metric.get()[1]))
-            print('~Samples/Sec {:.4f}'.format(BATCH_SIZE*(i+1)/(time.time()-tick_0)))
-            # reset evaluation result to initial state
-            metric.reset()
+    start = time.perf_counter()
+    for e in range(EPOCHS):
+        tick = time.time()
+        # reset the train data iterator.
+        train_itr.reset()
+        # loop over the train data iterator
+        for i, batch in enumerate(train_itr):
+            if i == 0:
+                tick_0 = time.time()
+            # splits train data into multiple slices along batch_axis
+            # copy each slice into a context
+            data = split_and_load(batch.data[0], ctx_list=ctx, batch_axis=0)
+            # splits train label into multiple slices along batch_axis
+            # copy each slice into a context
+            label = split_and_load(batch.label[0], ctx_list=ctx, batch_axis=0)
+            outputs = []
+            losses = []
+            # inside training scope
+            with ag.record():
+                for x, y in zip(data, label):
+                    z = net(x)
+                    # computes softmax cross entropy loss
+                    l = loss_fn(z, y)
+                    outputs.append(z)
+                    losses.append(l)
+            # backpropagate the error for one iteration
+            for l in losses:
+                l.backward()
+            # make one step of parameter update.
+            # trainer needs to know the batch size of data
+            # to normalize the gradient by 1/batch_size
+            trainer.step(BATCH_SIZE)
+            # updates internal evaluation
+            metric.update(label, outputs)
+            # Print batch metrics
+            if 0 == i % PRINT_N and 0 < i:
+                print('batch [{}], accuracy {:.4f}, samples/sec: {:.4f}'.format(
+                    i, metric.get()[1], BATCH_SIZE*(PRINT_N)/(time.time()-tick))
+                )
+                tick = time.time()
+        # gets the evaluation result
+        print('epoch [{}], accuracy {:.4f}, samples/sec: {:.4f}'.format(
+            e, metric.get()[1], BATCH_SIZE*(i+1)/(time.time()-tick_0))
+        )
+        # reset evaluation result to initial state
+        metric.reset()
 
     elapsed = time.perf_counter() - start
     print('elapsed: {:0.3f}'.format(elapsed))
-    # use Accuracy as the evaluation metric
-    metric = Accuracy()
-    for test_itr in test_ds:
-        for batch in test_itr:
-            data = split_and_load(batch.data[0], ctx_list=ctx, batch_axis=0)
-            label = split_and_load(batch.label[0], ctx_list=ctx, batch_axis=0)
-            outputs = []
-            for x in data:
-                outputs.append(net(x))
-            metric.update(label, outputs)
-    print('validation %s=%f' % metric.get())
+    ## use Accuracy as the evaluation metric
+    #metric = Accuracy()
+    #for batch in test_itr:
+    #    data = split_and_load(batch.data[0], ctx_list=ctx, batch_axis=0)
+    #    label = split_and_load(batch.label[0], ctx_list=ctx, batch_axis=0)
+    #    outputs = []
+    #    for x in data:
+    #        outputs.append(net(x))
+    #    metric.update(label, outputs)
+    #print('validation %s=%f' % metric.get())
 
 if __name__ == '__main__':
     main()

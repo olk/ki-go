@@ -7,7 +7,8 @@ import six
 import tarfile
 import time
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from math import ceil
 from pathlib import Path
 from urllib.request import urlopen, urlretrieve
 
@@ -179,34 +180,25 @@ class SGFDatasetBuilder:
         if 0 == len(os.listdir(str(self.processed_p))):
             self._prepare()
 
-    def as_train_dataset(self, batch_size, num_segments=1, shuffle=False):
+    def train_dataset(self, batch_size, num_segments=1, shuffle=False):
         recs_p = list(self.processed_p.glob(('train-%s-*.rec') % self.encoder.name()))
         if shuffle:
             random.shuffle(recs_p)
-        size = len(recs_p)
-        steps = int(size/num_segments)
-        segments = [recs_p[i*steps:(i+1)*steps] for i in range(steps+1)]
-        ds = SGFDataSet(segments, batch_size, self.encoder)
+        ds = SGFDataIter(recs_p, batch_size, num_segments, self.encoder.shape())
         return ds
 
-    def as_val_dataset(self, batch_size, num_segments=1, shuffle=False):
+    def val_dataset(self, batch_size, num_segments=1, shuffle=False):
         recs_p = list(self.processed_p.glob(('val-%s-*.rec') % self.encoder.name()))
         if shuffle:
             random.shuffle(recs_p)
-        size = len(recs_p)
-        steps = int(size/num_segments)
-        segments = [recs_p[i*steps:(i+1)*steps] for i in range(steps+1)]
-        ds = SGFDataSet(segments, batch_size, self.encoder)
+        ds = SGFDataIter(recs_p, batch_size, num_segments, self.encoder.shape())
         return ds
 
-    def as_test_dataset(self, batch_size, num_segments=1, shuffle=False):
+    def test_dataset(self, batch_size, num_segments=1, shuffle=False):
         recs_p = list(self.processed_p.glob(('test-%s-*.rec') % self.encoder.name()))
         if shuffle:
             random.shuffle(recs_p)
-        size = len(recs_p)
-        steps = int(size/num_segments)
-        segments = [recs_p[i*steps:(i+1)*steps] for i in range(steps+1)]
-        ds = SGFDataSet(segments, batch_size, self.encoder)
+        ds = SGFDataIter(recs_p, batch_size, num_segments, self.encoder.shape())
         return ds
 
 
@@ -241,7 +233,8 @@ def _init_collector(dataset, shape):
     global _dataset
     global _decoder
     _dataset = dataset
-    _decoder = ProcessPoolExecutor(initializer=_init_decoder, initargs=(dataset, shape))
+    _decoder = ProcessPoolExecutor(max_workers=100,initializer=_init_decoder, initargs=(dataset, shape))
+    #_decoder = ThreadPoolExecutor(initializer=_init_decoder, initargs=(dataset, shape))
 
 def _fetch_fn(sidx):
     global _dataset
@@ -256,33 +249,65 @@ def _fetch_fn(sidx):
     assert len(results) == len(_dataset[sidx]), 'results and current segment of different length'
     for f in as_completed(results):
         d, l = f.result()
-        del f
         data.extend(d)
         label.extend(l)
     assert len(data) == len(label), 'data and label of different length'
     return data, label
 
-class SGFDataSet:
-    def __init__(self, dataset, batch_size, encoder):
+class SGFDataIter:
+    def __init__(self, dataset, batch_size, num_segments, shape):
+        super(SGFDataIter, self).__init__()
+        # segmentation of dataset
+        steps = ceil(len(dataset)/num_segments)
+        dataset = [dataset[i*steps:(i+1)*steps] for i in range(steps+1)]
         self._batch_size = batch_size
         self._max_idx = len(dataset)
         self._idx = 0
-        self._collector = ProcessPoolExecutor(max_workers=1, initializer=_init_collector, initargs=(dataset, encoder.shape(),))
+        self._itr = None
+        self._fut = None
+        self._collector = ProcessPoolExecutor(max_workers=1, initializer=_init_collector, initargs=(dataset, shape))
+        #self._collector = ThreadPoolExecutor(max_workers=1, initializer=_init_collector, initargs=(dataset, shape))
+        self._provide_data = [mx.io.DataDesc('data', (batch_size,) + shape, layout='NCHW')]
+        self._provide_label = [mx.io.DataDesc('label', (batch_size,), layout='NCHW')]
 
     def __iter__(self):
-        self._fut = self._collector.submit(_fetch_fn, self._idx)
+        self._fut = self._collector.submit(_fetch_fn, self._idx) # reset=True?
         return self
 
     def __next__(self):
+        if self._itr is None:
+            self._fetch_next()
+        try:
+            batch = next(self._itr)
+        except StopIteration:
+            self._fetch_next()    
+            batch = next(self._itr)
+        return batch
+
+    def _fetch_next(self):
         if self._idx == self._max_idx:
             raise StopIteration
         # processing of current segment has finished
         data, label = self._fut.result()
         data = mx.nd.array(data)
         label = mx.nd.array(label)
-        itr = mx.io.NDArrayIter(data, label, self._batch_size)
-        # next segment
+        self._itr = mx.io.NDArrayIter(data, label, self._batch_size)
+        # increment segment counter
         self._idx += 1
-        # decode next segment
-        self._fut = self._collector.submit(_fetch_fn, self._idx)
-        return itr
+        if self._idx < self._max_idx:
+            # prefetch next segment
+            self._fut = self._collector.submit(_fetch_fn, self._idx)
+
+    def reset(self):
+        if self._fut is not None:
+            self._fut.cancel()
+        self._idx = 0
+        self._itr = None
+
+    @property
+    def provide_data(self):
+        return self._provide_data
+
+    @property
+    def provide_label(self):
+        return self._provide_label

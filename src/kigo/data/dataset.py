@@ -9,6 +9,7 @@ import time
 
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from math import ceil
+from multiprocessing import cpu_count
 from pathlib import Path
 from urllib.request import urlopen, urlretrieve
 
@@ -180,44 +181,55 @@ class SGFDatasetBuilder:
         if 0 == len(os.listdir(str(self.processed_p))):
             self._prepare()
 
-    def train_dataset(self, batch_size, num_segments=1, shuffle=False):
+    def train_dataset(self, batch_size, max_worker=cpu_count(), shuffle=False, factor=5):
         recs_p = list(self.processed_p.glob(('train-%s-*.rec') % self.encoder.name()))
         if shuffle:
             random.shuffle(recs_p)
-        ds = SGFDataIter(recs_p, batch_size, num_segments, self.encoder.shape())
-        return ds
+        return SGFDataIter(recs_p, batch_size, max_worker, self.encoder, shuffle, factor)
 
-    def val_dataset(self, batch_size, num_segments=1, shuffle=False):
+    def val_dataset(self, batch_size, max_worker=4, shuffle=False, factor=5):
         recs_p = list(self.processed_p.glob(('val-%s-*.rec') % self.encoder.name()))
         if shuffle:
             random.shuffle(recs_p)
-        ds = SGFDataIter(recs_p, batch_size, num_segments, self.encoder.shape())
-        return ds
+        return SGFDataIter(recs_p, batch_size, max_worker, self.encoder, shuffle, factor)
 
-    def test_dataset(self, batch_size, num_segments=1, shuffle=False):
+    def test_dataset(self, batch_size, max_worker=4, shuffle=False, factor=5):
         recs_p = list(self.processed_p.glob(('test-%s-*.rec') % self.encoder.name()))
         if shuffle:
             random.shuffle(recs_p)
-        ds = SGFDataIter(recs_p, batch_size, num_segments, self.encoder.shape())
-        return ds
+        return SGFDataIter(recs_p, batch_size, max_worker, self.encoder, shuffle, factor)
 
 
-_shape = None
-_decoder = None
+_batch_size = None
 _dataset = None
+_decoder = None
+_shape = None
+_zip = None
+_idx = None
+_max_idx = None
+_shuffle = None
+_recs_per_batch = None
+_results = None
+_factor = None
 
-def _init_decoder(dataset, shape):
+
+def _init_decoder(dataset, shape, shuffle):
     global _dataset
     global _shape
+    global _shuffle
     _dataset = dataset
     _shape = shape
+    _shuffle = shuffle
 
-def _decode_fn(sidx, ridx):
+
+def _decode_fn(idx):
     global _dataset
     global _shape
+    global _shuffle
     assert _dataset is not None
     assert _shape is not None
-    record = mx.recordio.MXRecordIO(str(_dataset[sidx][ridx]), 'r')
+    assert _shuffle is not None
+    record = mx.recordio.MXRecordIO(str(_dataset[idx]), 'r')
     size = int(record.read())
     data = [None]*size
     label = [None]*size
@@ -225,84 +237,118 @@ def _decode_fn(sidx, ridx):
         d = record.read()
         hdr, s = mx.recordio.unpack(d)
         label[i] = int(hdr.label)
-        data[i] = np.reshape(np.frombuffer(s, dtype='int'), _shape)
+        data[i] = np.reshape(np.frombuffer(s, dtype=np.int), _shape)
     record.close()
-    return data, label
+    z = list(zip(data, label))
+    if _shuffle:
+        random.shuffle(z)
+    return z
 
-def _init_collector(dataset, shape):
-    global _dataset
-    global _decoder
-    _dataset = dataset
-    _decoder = ProcessPoolExecutor(max_workers=100,initializer=_init_decoder, initargs=(dataset, shape))
-    #_decoder = ThreadPoolExecutor(initializer=_init_decoder, initargs=(dataset, shape))
 
-def _fetch_fn(sidx):
-    global _dataset
+def _init_collector(max_worker, batch_size, dataset, shape, shuffle, factor):
+    global _batch_size
     global _decoder
-    assert _dataset is not None
+    global _zip
+    global _idx
+    global _max_idx
+    global _recs_per_batch
+    global _results
+    global _factor
+    _batch_size = batch_size
+    _zip = []
+    _idx = 0
+    _max_idx = len(dataset)
+    _results = []
+    _factor = factor
+    # assumption: each record file contains 100 moves at average
+    _recs_per_batch = ceil(_batch_size / 100)
+    #_decoder = ProcessPoolExecutor(max_workers=max_worker, initializer=_init_decoder, initargs=(dataset, shape, shuffle))
+    _decoder = ThreadPoolExecutor(max_workers=max_worker, initializer=_init_decoder, initargs=(dataset, shape, shuffle))
+
+
+def _batchify_fn(reinit):
+    global _batch_size
+    global _decoder
+    global _zip
+    global _idx
+    global _max_idx
+    global _regs_per_batch
+    global _results
+    global _factor
+    assert _batch_size is not None
     assert _decoder is not None
-    # push data
-    results = [_decoder.submit(_decode_fn, sidx, ridx) for ridx in range(len(_dataset[sidx]))]
-    # fetch data
-    data = []
-    label = []
-    assert len(results) == len(_dataset[sidx]), 'results and current segment of different length'
-    for f in as_completed(results):
-        d, l = f.result()
-        data.extend(d)
-        label.extend(l)
-    assert len(data) == len(label), 'data and label of different length'
-    return data, label
+    assert _zip is not None
+    assert _idx is not None
+    assert _max_idx is not None
+    assert _recs_per_batch is not None
+    assert _factor is not None
+    # reset
+    if reinit:
+        _zip = []
+        _idx = 0
+        while len(_zip) < _factor * _batch_size and _idx < _max_idx:
+            # request data
+            new_idx = min(_idx + _recs_per_batch, _max_idx)
+            results = [_decoder.submit(_decode_fn, idx) for idx in range(_idx, new_idx)]
+            _idx = new_idx
+            # fetch data
+            for f in as_completed(results):
+                z = f.result()
+                _zip += z
+            # request data
+            new_idx = min(_idx + _recs_per_batch, _max_idx)
+            _results = [_decoder.submit(_decode_fn, idx) for idx in range(_idx, new_idx)]
+            _idx = new_idx
+    else:
+        # fetch data
+        for f in as_completed(_results):
+            z = f.result()
+            _zip += z
+        _results = []
+        if len(_zip) < _factor * _batch_size and _idx < _max_idx:
+            # request data
+            new_idx = min(_idx + _recs_per_batch, _max_idx)
+            _results = [_decoder.submit(_decode_fn, idx) for idx in range(_idx, new_idx)]
+            _idx = new_idx
+    # no more data
+    if 0 == len(_zip) and _idx == _max_idx:
+        return None
+    # create batch
+    z, _zip = _zip[:_batch_size], _zip[_batch_size:]
+    pad = 0
+    if len(z) < _batch_size:
+        pad = _batch_size - len(z)
+        # pad with first element
+        # padded elelments will be ignored
+        z = z + [z[0]*pad]
+    return z, pad
 
-class SGFDataIter:
-    def __init__(self, dataset, batch_size, num_segments, shape):
-        super(SGFDataIter, self).__init__()
-        # segmentation of dataset
-        steps = ceil(len(dataset)/num_segments)
-        dataset = [dataset[i*steps:(i+1)*steps] for i in range(steps+1)]
-        self._batch_size = batch_size
-        self._max_idx = len(dataset)
-        self._idx = 0
-        self._itr = None
-        self._fut = None
-        self._collector = ProcessPoolExecutor(max_workers=1, initializer=_init_collector, initargs=(dataset, shape))
-        #self._collector = ThreadPoolExecutor(max_workers=1, initializer=_init_collector, initargs=(dataset, shape))
-        self._provide_data = [mx.io.DataDesc('data', (batch_size,) + shape, layout='NCHW')]
+
+class SGFDataIter(mx.io.DataIter):
+    def __init__(self, dataset, batch_size, max_worker, encoder, shuffle, factor):
+        self._provide_data = [mx.io.DataDesc('data', (batch_size,) + encoder.shape(), layout='NCHW')]
         self._provide_label = [mx.io.DataDesc('label', (batch_size,), layout='NCHW')]
+        #self._collector = ProcessPoolExecutor(max_workers=1, initializer=_init_collector, initargs=(max_worker, batch_size, dataset, encoder.shape(), shuffle, factor))
+        self._collector = ThreadPoolExecutor(max_workers=1, initializer=_init_collector, initargs=(max_worker, batch_size, dataset, encoder.shape(), shuffle, factor))
+        self._fut = None
 
     def __iter__(self):
-        self._fut = self._collector.submit(_fetch_fn, self._idx) # reset=True?
         return self
 
     def __next__(self):
-        if self._itr is None:
-            self._fetch_next()
-        try:
-            batch = next(self._itr)
-        except StopIteration:
-            self._fetch_next()    
-            batch = next(self._itr)
-        return batch
-
-    def _fetch_next(self):
-        if self._idx == self._max_idx:
+        result = self._fut.result()
+        if result is None:
             raise StopIteration
-        # processing of current segment has finished
-        data, label = self._fut.result()
-        data = mx.nd.array(data)
-        label = mx.nd.array(label)
-        self._itr = mx.io.NDArrayIter(data, label, self._batch_size)
-        # increment segment counter
-        self._idx += 1
-        if self._idx < self._max_idx:
-            # prefetch next segment
-            self._fut = self._collector.submit(_fetch_fn, self._idx)
+        # request next batch
+        self._fut = self._collector.submit(_batchify_fn, False)
+        z, pad = result
+        d, l = zip(*z)
+        return mx.io.DataBatch([d],[l], pad)
 
     def reset(self):
         if self._fut is not None:
             self._fut.cancel()
-        self._idx = 0
-        self._itr = None
+        self._fut = self._collector.submit(_batchify_fn, True)
 
     @property
     def provide_data(self):

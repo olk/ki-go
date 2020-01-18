@@ -13,7 +13,6 @@ from kigo.encoders.sevenplane import SevenPlaneEncoder
 from kigo.networks.betago import Model
 
 BATCH_SIZE = 1024
-NUM_SEGMENTS = 500
 EPOCHS = 25
 GPU_COUNT = 1
 PRINT_N = 5
@@ -23,7 +22,7 @@ def main():
     encoder = SevenPlaneEncoder((19, 19))
     builder = SGFDatasetBuilder(data_p, encoder=encoder)
     builder.download_and_prepare()
-    train_itr = builder.train_dataset(batch_size=BATCH_SIZE, num_segments=NUM_SEGMENTS, shuffle=True)
+    train_itr = builder.train_dataset(batch_size=BATCH_SIZE)
     #test_itr = builder.test_dataset(batch_size=BATCH_SIZE)
     # build nodel
     net = Model()

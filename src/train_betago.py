@@ -2,6 +2,7 @@ import mxnet as mx
 import time
 
 from pathlib import Path
+from multiprocessing import cpu_count
 from mxnet import autograd as ag
 from mxnet.metric import Accuracy
 from mxnet.gluon import Trainer
@@ -12,19 +13,20 @@ from kigo.data.dataset import SGFDatasetBuilder
 from kigo.encoders.sevenplane import SevenPlaneEncoder
 from kigo.networks.betago import Model
 
-BATCH_SIZE = 1024
-NUM_SEGMENTS = 500
+GPU_COUNT = 2
+BATCH_SIZE_PER_REPLICA = 512
+BATCH_SIZE = BATCH_SIZE_PER_REPLICA * GPU_COUNT
 EPOCHS = 25
-GPU_COUNT = 1
-PRINT_N = 5
+PRINT_N = 10
+FACTOR = 10
 
 def main():
-    data_p = Path('/storage/data/ki-go').resolve()
+    data_p = Path('./data/').resolve()
     encoder = SevenPlaneEncoder((19, 19))
     builder = SGFDatasetBuilder(data_p, encoder=encoder)
     builder.download_and_prepare()
-    train_itr = builder.train_dataset(batch_size=BATCH_SIZE, num_segments=NUM_SEGMENTS, shuffle=True)
-    #test_itr = builder.test_dataset(batch_size=BATCH_SIZE)
+    train_itr = builder.train_dataset(batch_size=BATCH_SIZE, max_worker=cpu_count(), factor=FACTOR)
+    test_itr = builder.test_dataset(batch_size=BATCH_SIZE, max_worker=cpu_count(), factor=FACTOR)
     # build nodel
     net = Model()
     # hybridize for speed
@@ -65,10 +67,10 @@ def main():
                 tick_0 = time.time()
             # splits train data into multiple slices along batch_axis
             # copy each slice into a context
-            data = split_and_load(batch.data[0], ctx_list=ctx, batch_axis=0)
+            data = split_and_load(batch.data[0], ctx_list=ctx, batch_axis=0, even_split=False)
             # splits train label into multiple slices along batch_axis
             # copy each slice into a context
-            label = split_and_load(batch.label[0], ctx_list=ctx, batch_axis=0)
+            label = split_and_load(batch.label[0], ctx_list=ctx, batch_axis=0, even_split=False)
             outputs = []
             losses = []
             # inside training scope
@@ -103,16 +105,17 @@ def main():
 
     elapsed = time.perf_counter() - start
     print('elapsed: {:0.3f}'.format(elapsed))
-    ## use Accuracy as the evaluation metric
-    #metric = Accuracy()
-    #for batch in test_itr:
-    #    data = split_and_load(batch.data[0], ctx_list=ctx, batch_axis=0)
-    #    label = split_and_load(batch.label[0], ctx_list=ctx, batch_axis=0)
-    #    outputs = []
-    #    for x in data:
-    #        outputs.append(net(x))
-    #    metric.update(label, outputs)
-    #print('validation %s=%f' % metric.get())
+    # use Accuracy as the evaluation metric
+    metric = Accuracy()
+    test_itr.reset()
+    for batch in test_itr:
+        data = split_and_load(batch.data[0], ctx_list=ctx, batch_axis=0, even_split=False)
+        label = split_and_load(batch.label[0], ctx_list=ctx, batch_axis=0, even_split=False)
+        outputs = []
+        for x in data:
+            outputs.append(net(x))
+        metric.update(label, outputs)
+    print('validation %s=%f' % metric.get())
 
 if __name__ == '__main__':
     main()

@@ -51,7 +51,6 @@ def main():
     loss_fn = SoftmaxCrossEntropyLoss()
     # use accuracy as the evaluation metric
     metric = Accuracy()
-    start = time.perf_counter()
     # train
     start = time.perf_counter()
     for e in range(EPOCHS):
@@ -100,8 +99,8 @@ def main():
         # reset evaluation result to initial state
         metric.reset()
 
-    elapsed = time.perf_counter() - start
-    print('elapsed: {:0.3f}'.format(elapsed))
+   #elapsed = time.perf_counter() - start
+   #print('elapsed: {:0.3f}'.format(elapsed))
     ## use Accuracy as the evaluation metric
     #metric = Accuracy()
     #for batch in test_itr:

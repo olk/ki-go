@@ -32,6 +32,9 @@ mcts-bvb:
 mcts-hvb:
 	$(PYTHON_INTERPRETER) src/mcts_hvb.py
 
+mcts-web:
+	$(PYTHON_INTERPRETER) src/mcts_web.py
+
 get-sgf:
 	$(PYTHON_INTERPRETER) src/get_sgf.py
 

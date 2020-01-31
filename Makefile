@@ -17,6 +17,9 @@ random-bvb:
 random-hvb:
 	$(PYTHON_INTERPRETER) src/random_hvb.py
 
+random-web:
+	$(PYTHON_INTERPRETER) src/random_web.py
+
 depthbruned-bvb:
 	$(PYTHON_INTERPRETER) src/depthbruned_bvb.py
 

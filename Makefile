@@ -32,6 +32,15 @@ mcts-hvb:
 get-sgf:
 	$(PYTHON_INTERPRETER) src/get_sgf.py
 
+train-betago:
+	$(PYTHON_INTERPRETER) src/train_betago.py
+
+test-betago:
+	$(PYTHON_INTERPRETER) src/test_betago.py
+
+betago-hvb:
+	$(PYTHON_INTERPRETER) src/betago_hvb.py
+
 ## Delete all compiled Python files
 clean:
 	find . -type f -name "*.py[co]" -delete

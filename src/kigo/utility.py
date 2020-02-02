@@ -42,6 +42,7 @@ def coords_from_point(point):
         point.row
     )
 
+
 class MoveAge:
     def __init__(self, board):
         self.move_ages = - np.ones((board.num_rows, board.num_cols))
@@ -57,3 +58,14 @@ class MoveAge:
 
     def increment_all(self):
         self.move_ages[self.move_ages > -1] += 1
+
+
+def coords_to_gtp_position(move):
+    point = move.point
+    return COLS[point.col - 1] + str(point.row)
+
+
+def gtp_position_to_coords(gtp_position):
+    col_str, row_str = gtp_position[0], gtp_position[1:]
+    point = Point(int(row_str), COLS.find(col_str.upper()) + 1)
+    return point

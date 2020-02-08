@@ -50,6 +50,9 @@ betago-hvb:
 betago-web:
 	$(PYTHON_INTERPRETER) src/betago_web.py
 
+betago-local:
+	$(PYTHON_INTERPRETER) src/betago_local.py
+
 ## Delete all compiled Python files
 clean:
 	find . -type f -name "*.py[co]" -delete

@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from multiprocessing import cpu_count
 from mxnet import autograd as ag
-from mxnet.metric import Accuracy
+from mxnet.gluon.metric import Accuracy
 from mxnet.gluon import Trainer
 from mxnet.gluon.loss import SoftmaxCrossEntropyLoss
 from mxnet.gluon.utils import split_and_load

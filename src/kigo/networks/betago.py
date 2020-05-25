@@ -5,7 +5,7 @@ from mxnet.gluon import Trainer
 from mxnet.gluon.nn import Conv2D, Dense, Flatten, HybridBlock
 from mxnet.gluon.loss import SoftmaxCrossEntropyLoss
 from mxnet.gluon.utils import split_and_load
-from mxnet.metric import Accuracy
+from mxnet.gluon.metric import Accuracy
 
 # based on https://github.com/maxpumperla/self._net
 
